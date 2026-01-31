@@ -646,6 +646,9 @@ def main() -> None:
             continue
         if not finding.published_dt:
             continue
+        # Skip future dates (likely data errors)
+        if finding.published_dt > now:
+            continue
         if finding.has_time:
             if now - finding.published_dt > timedelta(hours=24):
                 continue
