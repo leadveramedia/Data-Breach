@@ -596,24 +596,32 @@ def load_smtp_settings() -> Dict[str, str]:
     return settings
 
 
-def send_email(settings: Dict[str, str], finding: Finding) -> None:
+def send_email(settings: Dict[str, str], findings: List[Finding]) -> None:
     msg = EmailMessage()
-    msg["Subject"] = f"[Breach Alert] {finding.title}"
+    count = len(findings)
+    msg["Subject"] = f"[Breach Alert] {count} new data breach{'es' if count != 1 else ''} found"
     msg["From"] = f"{settings['from_name']} <{settings['from_email']}>"
     msg["To"] = settings["to_email"]
 
-    body = "\n".join(
-        [
-            f"Source: {finding.source_id}",
-            f"Source URL: {finding.source_url}",
-            f"Type: {finding.kind}",
-            f"Published: {finding.published or 'unknown'}",
-            f"Title: {finding.title}",
-            f"URL: {finding.url}",
-            "",
-            f"Summary: {finding.summary}",
-        ]
-    )
+    sections = []
+    for i, finding in enumerate(findings, 1):
+        section = "\n".join(
+            [
+                f"{'=' * 60}",
+                f"#{i}: {finding.title}",
+                f"{'=' * 60}",
+                f"Source: {finding.source_id}",
+                f"Source URL: {finding.source_url}",
+                f"Type: {finding.kind}",
+                f"Published: {finding.published or 'unknown'}",
+                f"URL: {finding.url}",
+                f"Summary: {finding.summary}",
+            ]
+        )
+        sections.append(section)
+
+    body = f"Daily Data Breach Report - {count} new finding{'s' if count != 1 else ''}\n\n"
+    body += "\n\n".join(sections)
     msg.set_content(body)
 
     import smtplib
@@ -654,8 +662,7 @@ def main() -> None:
         return
 
     smtp = load_smtp_settings()
-    for finding in new_findings:
-        send_email(smtp, finding)
+    send_email(smtp, new_findings)
 
     save_seen(seen_path, seen)
 
