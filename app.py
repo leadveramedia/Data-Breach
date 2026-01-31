@@ -4,6 +4,7 @@ import json
 import os
 import re
 import time
+import warnings
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
@@ -14,6 +15,7 @@ import requests
 import yaml
 from bs4 import BeautifulSoup
 from dateutil import parser as dateparser
+from dateutil.parser import UnknownTimezoneWarning
 from dotenv import load_dotenv
 import feedparser
 
@@ -71,7 +73,9 @@ def parse_datetime(value: str) -> Optional[datetime]:
     if not value:
         return None
     try:
-        dt = dateparser.parse(value, fuzzy=True)
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=UnknownTimezoneWarning)
+            dt = dateparser.parse(value, fuzzy=True)
         if not dt:
             return None
         if dt.tzinfo is None:
