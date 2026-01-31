@@ -1,0 +1,72 @@
+app:
+  seen_store: data/seen.json
+  request_timeout_seconds: 30
+  user_agent: "BreachNotifier/1.0 (contact: rshao@mcnicholaslaw.com)"
+  sec_user_agent: "BreachNotifier/1.0 (contact: rshao@mcnicholaslaw.com)"
+  max_new_per_run: 200
+  keywords:
+    - breach
+    - data breach
+    - cybersecurity incident
+    - cyber incident
+    - ransomware
+    - extortion
+    - intrusion
+    - hacked
+    - hack
+    - exfiltration
+    - leak
+    - exposed
+    - unauthorized access
+
+sources:
+  - id: hhs_ocr
+    type: hhs_ocr
+    url: https://ocrportal.hhs.gov/ocr/breach/breach_report.jsf
+    kind: official
+
+  - id: ca_ag
+    type: ca_ag
+    url: https://oag.ca.gov/privacy/databreach/list
+    kind: official
+
+  - id: me_ag
+    type: me_ag
+    url: https://www.maine.gov/agviewer/content/ag/985235c7-cb95-4be2-8792-a1252b4f8318/list.html
+    kind: official
+
+  - id: ftc_press
+    type: ftc_press
+    urls:
+      - https://www.ftc.gov/news-events/news/press-releases/2026
+      - https://www.ftc.gov/news-events/news/press-releases/2025
+    kind: official
+
+  - id: doj_press
+    type: doj_press
+    url: https://www.justice.gov/api/v1/press_releases.json
+    pagesize: 50
+    kind: official
+
+  - id: cisa_alerts
+    type: rss
+    urls:
+      - https://www.cisa.gov/cybersecurity-advisories/alerts.xml
+      - https://www.cisa.gov/cybersecurity-advisories/all.xml
+    kind: official
+
+  - id: sec_8k_item_105
+    type: sec_8k_item_105
+    rss_url: https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=8-K&count=100&output=atom
+    max_entries: 40
+    filing_check_delay_seconds: 0.5
+    kind: official
+
+  - id: ransomware_live
+    type: ransomware_live
+    base_url: https://api.ransomware.live/v2
+    endpoint: /recentvictims
+    country_allowlist:
+      - US
+    include_unknown_country: false
+    kind: dark_web
