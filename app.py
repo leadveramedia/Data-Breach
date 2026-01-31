@@ -284,10 +284,11 @@ def fetch_me_ag(source: Dict[str, Any], cfg: Dict[str, Any]) -> List[Finding]:
         cells = row.find_all(["td", "th"])
         if len(cells) < 2:
             continue
-        name = clean_text(cells[0].get_text())
-        if not name or name.lower().startswith("company"):
+        # Column 0 = Date Reported, Column 1 = Organization Name
+        date_val = clean_text(cells[0].get_text())
+        name = clean_text(cells[1].get_text())
+        if not name or name.lower().startswith("organization") or date_val.lower().startswith("date"):
             continue
-        date_val = clean_text(cells[1].get_text())
         published_dt = parse_datetime(date_val)
         has_time = has_time_label(date_val)
         published = format_dt(published_dt)
