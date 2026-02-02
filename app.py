@@ -155,9 +155,31 @@ def fetch_hhs_ocr(source: Dict[str, Any], cfg: Dict[str, Any]) -> List[Finding]:
             published_dt = parse_datetime(date_val)
             has_time = has_time_label(date_val)
             published = format_dt(published_dt)
-            state = clean_text(row.get("State") or "")
+
+            # Extract all available fields
+            summary_parts = []
             affected = clean_text(row.get("Individuals Affected") or "")
-            summary = f"State: {state} | Individuals affected: {affected}".strip(" |")
+            if affected:
+                summary_parts.append(f"Persons affected: {affected}")
+            state = clean_text(row.get("State") or "")
+            if state:
+                summary_parts.append(f"State: {state}")
+            entity_type = clean_text(row.get("Covered Entity Type") or "")
+            if entity_type:
+                summary_parts.append(f"Entity type: {entity_type}")
+            breach_type = clean_text(row.get("Type of Breach") or "")
+            if breach_type:
+                summary_parts.append(f"Breach type: {breach_type}")
+            location = clean_text(row.get("Location of Breached Information") or "")
+            if location:
+                summary_parts.append(f"Info location: {location}")
+            ba_present = clean_text(row.get("Business Associate Present") or "")
+            if ba_present:
+                summary_parts.append(f"Business associate: {ba_present}")
+            web_desc = clean_text(row.get("Web Description") or "")
+            if web_desc:
+                summary_parts.append(f"Description: {web_desc}")
+            summary = " | ".join(summary_parts)
             findings.append(
                 Finding(
                     source_id=source["id"],
@@ -233,25 +255,28 @@ def fetch_ca_ag(source: Dict[str, Any], cfg: Dict[str, Any]) -> List[Finding]:
             date_val = (
                 row.get("Reported Date")
                 or row.get("Date Reported")
-                or row.get("Date(s) of Breach")
                 or ""
             )
             published_dt = parse_datetime(date_val)
             has_time = has_time_label(date_val)
             published = format_dt(published_dt)
             notice_url = link_map.get(name, url)
-            summary = clean_text(
-                " | ".join(
-                    filter(
-                        None,
-                        [
-                            row.get("Type of Breach"),
-                            row.get("Type of Information"),
-                            row.get("Notice Provided to"),
-                        ],
-                    )
-                )
-            )
+
+            # Build detailed summary
+            summary_parts = []
+            breach_dates = clean_text(row.get("Date(s) of Breach") or "")
+            if breach_dates:
+                summary_parts.append(f"Breach date(s): {breach_dates}")
+            breach_type = clean_text(row.get("Type of Breach") or "")
+            if breach_type:
+                summary_parts.append(f"Breach type: {breach_type}")
+            info_type = clean_text(row.get("Type of Information") or "")
+            if info_type:
+                summary_parts.append(f"Info compromised: {info_type}")
+            notice_to = clean_text(row.get("Notice Provided to") or "")
+            if notice_to:
+                summary_parts.append(f"Notice to: {notice_to}")
+            summary = " | ".join(summary_parts)
             findings.append(
                 Finding(
                     source_id=source["id"],
@@ -570,16 +595,42 @@ def fetch_ransomware_live(source: Dict[str, Any], cfg: Dict[str, Any]) -> List[F
                 continue
         elif not include_unknown:
             continue
-        victim = clean_text(item.get("victim", ""))
+        # Support both old and new API field names
+        victim = clean_text(item.get("post_title") or item.get("victim", ""))
         if not victim:
             continue
-        date_val = str(item.get("discovered") or item.get("attackdate") or "")
+        date_val = str(item.get("discovered") or item.get("published") or item.get("attackdate") or "")
         published_dt = parse_datetime(date_val)
         has_time = has_time_label(date_val)
         published = format_dt(published_dt)
-        group = clean_text(item.get("group", ""))
-        link = item.get("url") or item.get("post") or ""
-        summary = clean_text(f"Group: {group} | Country: {country}")
+        link = item.get("post_url") or item.get("url") or item.get("post") or ""
+
+        # Build detailed summary
+        summary_parts = []
+        group = clean_text(item.get("group_name") or item.get("group", ""))
+        if group:
+            summary_parts.append(f"Ransomware group: {group}")
+        if country:
+            summary_parts.append(f"Country: {country}")
+        activity = clean_text(item.get("activity", ""))
+        if activity:
+            summary_parts.append(f"Sector: {activity}")
+        website = clean_text(item.get("website", ""))
+        if website:
+            summary_parts.append(f"Website: {website}")
+        description = clean_text(item.get("description", ""))
+        if description:
+            summary_parts.append(f"Description: {description}")
+        extrainfos = item.get("extrainfos") or {}
+        if isinstance(extrainfos, dict):
+            data_size = clean_text(str(extrainfos.get("data_size", "")))
+            if data_size:
+                summary_parts.append(f"Data size: {data_size}")
+            ransom = clean_text(str(extrainfos.get("ransom", "")))
+            if ransom:
+                summary_parts.append(f"Ransom: {ransom}")
+        summary = " | ".join(summary_parts)
+
         findings.append(
             Finding(
                 source_id=source["id"],
