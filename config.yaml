@@ -70,3 +70,21 @@ sources:
       - US
     include_unknown_country: false
     kind: dark_web
+
+  - id: darkweb_direct
+    type: darkweb_leak_site
+    groups:
+      - lockbit
+      - alphv
+      - blackcat
+      - clop
+      - play
+      - blackbasta
+      - akira
+      - ransomhub
+      - medusa
+      - bianlian
+    max_sites_per_run: 15
+    request_delay_seconds: 3
+    tor_timeout_seconds: 60
+    kind: dark_web

@@ -109,6 +109,29 @@ def http_get(url: str, headers: Optional[Dict[str, str]], timeout: int) -> reque
     return resp
 
 
+# Tor proxy settings for dark web access
+TOR_PROXY = "socks5h://127.0.0.1:9050"
+RANSOMWATCH_GROUPS_URL = "https://raw.githubusercontent.com/joshhighet/ransomwatch/main/groups.json"
+
+
+def http_get_tor(url: str, headers: Optional[Dict[str, str]], timeout: int) -> requests.Response:
+    """Make HTTP request through Tor proxy for .onion sites."""
+    session = requests.Session()
+    session.proxies = {
+        "http": TOR_PROXY,
+        "https": TOR_PROXY,
+    }
+    resp = session.get(url, headers=headers or {}, timeout=timeout)
+    resp.raise_for_status()
+    return resp
+
+
+def load_ransomwatch_groups(headers: Dict[str, str], timeout: int) -> List[Dict]:
+    """Fetch current ransomware group onion addresses from ransomwatch."""
+    resp = http_get(RANSOMWATCH_GROUPS_URL, headers, timeout)
+    return resp.json()
+
+
 def parse_rss(urls: List[str], headers: Dict[str, str], timeout: int) -> List[Dict]:
     entries: List[Dict] = []
     for url in urls:
@@ -647,6 +670,128 @@ def fetch_ransomware_live(source: Dict[str, Any], cfg: Dict[str, Any]) -> List[F
     return findings
 
 
+def parse_leak_site_victims(html: str, group_name: str, site_url: str) -> List[Dict]:
+    """Extract victim entries from a ransomware leak site HTML page."""
+    soup = BeautifulSoup(html, "lxml")
+    victims = []
+
+    # Common patterns across leak sites:
+    # 1. Card/box layouts with company names
+    # 2. Table rows with victim info
+    # 3. List items with links
+
+    # Try finding cards/boxes (common in modern leak sites)
+    for selector in [
+        "div.card", "div.post", "div.victim", "div.target",
+        "article", "div.item", "div.entry", "div.blog-post",
+        "div.leak", "div.company", "tr", "li.victim"
+    ]:
+        elements = soup.select(selector)
+        if len(elements) >= 3:  # Likely found the victim list
+            for el in elements[:50]:  # Limit to avoid huge lists
+                text = clean_text(el.get_text())
+                if len(text) < 3 or len(text) > 200:
+                    continue
+                # Skip navigation/header elements
+                if any(skip in text.lower() for skip in ["home", "contact", "about", "login", "register"]):
+                    continue
+                victims.append({
+                    "name": text[:100],
+                    "group": group_name,
+                    "url": site_url,
+                })
+            if victims:
+                break
+
+    # Fallback: look for text that looks like company names
+    if not victims:
+        # Find all text nodes that look like company names
+        for tag in soup.find_all(["h1", "h2", "h3", "h4", "strong", "b", "a"]):
+            text = clean_text(tag.get_text())
+            # Heuristics for company names: capitalized, reasonable length
+            if 3 < len(text) < 80 and not text.islower():
+                if any(skip in text.lower() for skip in ["home", "contact", "about", "login", "download"]):
+                    continue
+                victims.append({
+                    "name": text,
+                    "group": group_name,
+                    "url": site_url,
+                })
+            if len(victims) >= 30:
+                break
+
+    return victims
+
+
+def fetch_darkweb_leak_sites(source: Dict[str, Any], cfg: Dict[str, Any]) -> List[Finding]:
+    """Directly scrape ransomware leak sites via Tor."""
+    headers = {"User-Agent": cfg["app"]["user_agent"]}
+    timeout = source.get("tor_timeout_seconds", 60)
+    request_delay = source.get("request_delay_seconds", 2)
+    max_sites = source.get("max_sites_per_run", 20)
+    target_groups = set(g.lower() for g in source.get("groups", []))
+
+    # Load current group list from ransomwatch
+    try:
+        groups = load_ransomwatch_groups(headers, cfg["app"]["request_timeout_seconds"])
+    except Exception:
+        return []
+
+    findings: List[Finding] = []
+    sites_checked = 0
+
+    for group in groups:
+        group_name = group.get("name", "")
+        if target_groups and group_name.lower() not in target_groups:
+            continue
+
+        for location in group.get("locations", []):
+            if sites_checked >= max_sites:
+                break
+
+            # Only try available and enabled onion sites
+            if not location.get("available") or not location.get("enabled"):
+                continue
+            if location.get("version", 0) < 2:  # Skip clearnet (version 0)
+                continue
+
+            onion_url = location.get("slug", "")
+            if not onion_url or ".onion" not in onion_url:
+                continue
+
+            try:
+                resp = http_get_tor(onion_url, headers, timeout)
+                victims = parse_leak_site_victims(resp.text, group_name, onion_url)
+
+                now = datetime.now(timezone.utc)
+                for victim in victims:
+                    findings.append(
+                        Finding(
+                            source_id=source["id"],
+                            kind=source["kind"],
+                            source_url=onion_url,
+                            title=victim["name"],
+                            url=onion_url,
+                            published=format_dt(now),
+                            published_dt=now,
+                            has_time=True,
+                            summary=f"Ransomware group: {group_name} | Source: Dark web leak site",
+                        )
+                    )
+
+                sites_checked += 1
+            except Exception:
+                # Onion sites are unreliable, continue to next
+                pass
+
+            time.sleep(request_delay)
+
+        if sites_checked >= max_sites:
+            break
+
+    return findings
+
+
 def collect_findings(cfg: Dict[str, Any]) -> List[Finding]:
     findings: List[Finding] = []
     for source in cfg["sources"]:
@@ -668,6 +813,8 @@ def collect_findings(cfg: Dict[str, Any]) -> List[Finding]:
                 findings.extend(fetch_sec_8k_item_105(source, cfg))
             elif source_type == "ransomware_live":
                 findings.extend(fetch_ransomware_live(source, cfg))
+            elif source_type == "darkweb_leak_site":
+                findings.extend(fetch_darkweb_leak_sites(source, cfg))
         except Exception:
             continue
     return findings

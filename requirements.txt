@@ -1,7 +1,8 @@
-requests
+requests[socks]
 feedparser
 PyYAML
 python-dotenv
 beautifulsoup4
 lxml
 python-dateutil
+PySocks>=1.7.1
