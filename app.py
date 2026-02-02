@@ -270,6 +270,30 @@ def fetch_ca_ag(source: Dict[str, Any], cfg: Dict[str, Any]) -> List[Finding]:
     return findings
 
 
+def fetch_me_ag_detail(detail_url: str, headers: Dict[str, str], timeout: int) -> Dict[str, str]:
+    """Fetch additional breach details from individual Maine AG detail page."""
+    details: Dict[str, str] = {}
+    try:
+        resp = http_get(detail_url, headers=headers, timeout=timeout)
+        text = resp.text
+
+        patterns = [
+            ("persons_affected", r"Total number of persons affected[^:]*:\s*\**(\d[\d,]*)\**"),
+            ("date_occurred", r"Date\(s\) Breach Occur+ed:\s*\**([^\n<*]+)\**"),
+            ("date_discovered", r"Date Breach Discovered:\s*\**([^\n<*]+)\**"),
+            ("description", r"Description of the Breach:\s*\**([^\n<*]+)\**"),
+            ("info_acquired", r"Information Acquired[^:]*:\s*\**([^\n<*]+)\**"),
+        ]
+
+        for key, pattern in patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                details[key] = clean_text(match.group(1))
+    except Exception:
+        pass
+    return details
+
+
 def fetch_me_ag(source: Dict[str, Any], cfg: Dict[str, Any]) -> List[Finding]:
     url = source["url"]
     headers = {"User-Agent": cfg["app"]["user_agent"]}
@@ -298,7 +322,25 @@ def fetch_me_ag(source: Dict[str, Any], cfg: Dict[str, Any]) -> List[Finding]:
             if a:
                 link = urljoin(url, a["href"])
                 break
-        summary = clean_text(" ".join(c.get_text() for c in cells[2:]))
+
+        # Fetch detail page for additional info
+        summary_parts = []
+        if link:
+            details = fetch_me_ag_detail(link, headers, timeout)
+            time.sleep(0.3)  # Be polite to the server
+            if details.get("persons_affected"):
+                summary_parts.append(f"Persons affected: {details['persons_affected']}")
+            if details.get("date_occurred"):
+                summary_parts.append(f"Breach occurred: {details['date_occurred']}")
+            if details.get("date_discovered"):
+                summary_parts.append(f"Discovered: {details['date_discovered']}")
+            if details.get("description"):
+                summary_parts.append(f"Description: {details['description']}")
+            if details.get("info_acquired"):
+                summary_parts.append(f"Info acquired: {details['info_acquired']}")
+
+        summary = " | ".join(summary_parts) if summary_parts else ""
+
         findings.append(
             Finding(
                 source_id=source["id"],
