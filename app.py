@@ -26,6 +26,106 @@ MONTHS = (
 DATE_RE = re.compile(rf"({MONTHS})\s+\d{{1,2}},\s+\d{{4}}")
 TIME_RE = re.compile(r"\d{1,2}:\d{2}|\bAM\b|\bPM\b", re.IGNORECASE)
 
+# Dark web leak site extraction patterns
+DATA_SIZE_RE = re.compile(
+    r"(\d+(?:\.\d+)?)\s*(GB|TB|MB|gigabytes?|terabytes?|megabytes?)",
+    re.IGNORECASE,
+)
+DOMAIN_RE = re.compile(
+    r"(?:website|domain|url|site)[:\s]*((?:https?://)?[\w.-]+\.[a-z]{2,})",
+    re.IGNORECASE,
+)
+COUNTRY_RE = re.compile(
+    r"(?:country|location|region)[:\s]*([A-Za-z\s]+?)(?:\s*[|<\n]|$)",
+    re.IGNORECASE,
+)
+SECTOR_RE = re.compile(
+    r"(?:sector|industry|activity|business)[:\s]*([^<\n|]{3,50})",
+    re.IGNORECASE,
+)
+DEADLINE_RE = re.compile(
+    r"(?:deadline|expires?|timer|countdown)[:\s]*([^<\n]{5,30})",
+    re.IGNORECASE,
+)
+POST_DATE_RE = re.compile(
+    r"(?:posted|published|added|date)[:\s]*(\d{1,4}[-/]\d{1,2}[-/]\d{1,4})",
+    re.IGNORECASE,
+)
+
+# Skip words for filtering navigation elements
+SKIP_WORDS = frozenset([
+    "home", "contact", "about", "login", "register", "download",
+    "more", "read", "click", "view", "menu", "search", "faq",
+])
+
+# Country name to ISO code mapping
+COUNTRY_CODES = {
+    "united states": "US", "usa": "US", "u.s.": "US", "u.s.a.": "US", "america": "US",
+    "united kingdom": "GB", "uk": "GB", "great britain": "GB", "britain": "GB",
+    "germany": "DE", "france": "FR", "canada": "CA", "australia": "AU",
+    "italy": "IT", "spain": "ES", "brazil": "BR", "japan": "JP",
+    "netherlands": "NL", "belgium": "BE", "switzerland": "CH",
+    "mexico": "MX", "india": "IN", "china": "CN", "russia": "RU",
+    "south korea": "KR", "korea": "KR", "singapore": "SG",
+    "israel": "IL", "sweden": "SE", "norway": "NO", "denmark": "DK",
+    "finland": "FI", "austria": "AT", "poland": "PL", "portugal": "PT",
+    "ireland": "IE", "new zealand": "NZ", "south africa": "ZA",
+    "argentina": "AR", "chile": "CL", "colombia": "CO", "peru": "PE",
+    "thailand": "TH", "malaysia": "MY", "indonesia": "ID", "philippines": "PH",
+    "vietnam": "VN", "taiwan": "TW", "hong kong": "HK", "uae": "AE",
+    "saudi arabia": "SA", "egypt": "EG", "turkey": "TR", "greece": "GR",
+    "czech republic": "CZ", "czechia": "CZ", "hungary": "HU", "romania": "RO",
+    "ukraine": "UA", "pakistan": "PK", "bangladesh": "BD", "nigeria": "NG",
+}
+
+# Sector keywords for detection
+SECTOR_KEYWORDS = frozenset([
+    "healthcare", "medical", "hospital", "clinic", "pharmaceutical", "biotech",
+    "financial", "banking", "insurance", "investment", "fintech", "credit union",
+    "education", "university", "school", "college", "academy", "training",
+    "manufacturing", "industrial", "automotive", "aerospace", "electronics",
+    "retail", "e-commerce", "store", "wholesale", "consumer goods",
+    "technology", "software", "it services", "saas", "cloud", "cybersecurity",
+    "legal", "law firm", "attorney", "solicitor", "consulting",
+    "government", "municipal", "federal", "state", "public sector", "military",
+    "energy", "utilities", "oil", "gas", "power", "renewable",
+    "construction", "real estate", "property", "architecture", "engineering",
+    "transportation", "logistics", "shipping", "freight", "aviation", "maritime",
+    "telecommunications", "telecom", "media", "entertainment", "broadcasting",
+    "agriculture", "food", "beverage", "farming", "agribusiness",
+    "hospitality", "hotel", "restaurant", "tourism", "travel",
+    "nonprofit", "ngo", "charity", "foundation",
+])
+
+# Data type indicators for breach classification
+DATA_TYPE_INDICATORS = {
+    "pii": ["ssn", "social security", "personal information", "pii", "identity",
+            "passport", "driver license", "date of birth", "dob"],
+    "financial": ["credit card", "bank account", "financial", "payment", "billing",
+                  "tax", "accounting", "invoice", "wire transfer"],
+    "medical": ["health records", "medical", "hipaa", "patient", "phi",
+                "prescription", "diagnosis", "healthcare", "insurance claims"],
+    "credentials": ["password", "credentials", "login", "authentication",
+                    "api key", "token", "ssh key", "certificate"],
+    "corporate": ["contracts", "proprietary", "trade secret", "intellectual property",
+                  "nda", "internal", "confidential", "strategic"],
+    "employee": ["employee records", "hr records", "payroll", "personnel",
+                 "salary", "benefits", "w-2", "performance review"],
+    "customer": ["customer data", "client information", "user data",
+                 "subscriber", "member", "contact list", "crm"],
+}
+
+# Data attribute mappings for HTML data-* attributes
+DATA_ATTR_MAPPING = {
+    "data-name": "name", "data-company": "name", "data-victim": "name", "data-title": "name",
+    "data-country": "country", "data-location": "country", "data-region": "country",
+    "data-sector": "sector", "data-industry": "sector", "data-activity": "sector",
+    "data-size": "data_size", "data-volume": "data_size",
+    "data-date": "post_date", "data-published": "post_date", "data-time": "post_date",
+    "data-deadline": "deadline", "data-timer": "deadline",
+    "data-website": "website", "data-url": "website", "data-domain": "website",
+}
+
 
 @dataclass
 class Finding:
@@ -670,6 +770,168 @@ def fetch_ransomware_live(source: Dict[str, Any], cfg: Dict[str, Any]) -> List[F
     return findings
 
 
+def extract_data_attributes(element) -> Dict[str, str]:
+    """Extract information from HTML data-* attributes."""
+    details = {}
+    for attr, field in DATA_ATTR_MAPPING.items():
+        if element.has_attr(attr):
+            value = clean_text(element[attr])
+            if value and field not in details:
+                details[field] = value
+    return details
+
+
+def extract_victim_name(element) -> Optional[str]:
+    """Extract victim/company name from an HTML element."""
+    # Try heading tags first
+    for tag in element.find_all(["h1", "h2", "h3", "h4", "h5", "strong", "b"]):
+        text = clean_text(tag.get_text())
+        if 3 < len(text) < 100:
+            if not any(skip in text.lower() for skip in SKIP_WORDS):
+                return text
+
+    # Try data-* attributes
+    for attr in ["data-name", "data-company", "data-victim", "data-title"]:
+        if element.has_attr(attr):
+            return clean_text(element[attr])
+
+    # Fallback to full element text (truncated)
+    text = clean_text(element.get_text())
+    if 3 < len(text) < 200:
+        if not any(skip in text.lower() for skip in SKIP_WORDS):
+            return text[:100]
+
+    return None
+
+
+def extract_victim_details(element) -> Dict[str, str]:
+    """Extract detailed information from a victim entry element."""
+    details = {}
+    el_text = element.get_text()
+    el_text_lower = el_text.lower()
+
+    # 1. Extract from data-* attributes first
+    details.update(extract_data_attributes(element))
+
+    # 2. Extract website from href attributes or text
+    if not details.get("website"):
+        for a in element.find_all("a", href=True):
+            href = a["href"]
+            if ".onion" not in href and href.startswith("http"):
+                details["website"] = href
+                break
+        if not details.get("website"):
+            match = DOMAIN_RE.search(el_text)
+            if match:
+                details["website"] = match.group(1)
+
+    # 3. Extract data size
+    if not details.get("data_size"):
+        match = DATA_SIZE_RE.search(el_text)
+        if match:
+            details["data_size"] = f"{match.group(1)} {match.group(2).upper()}"
+
+    # 4. Extract country
+    if not details.get("country"):
+        match = COUNTRY_RE.search(el_text)
+        if match:
+            country_text = match.group(1).strip().lower()
+            details["country"] = COUNTRY_CODES.get(country_text, country_text.upper()[:3])
+        else:
+            # Check for country names in text
+            for country_name, code in COUNTRY_CODES.items():
+                if country_name in el_text_lower:
+                    details["country"] = code
+                    break
+
+    # 5. Extract sector/industry
+    if not details.get("sector"):
+        match = SECTOR_RE.search(el_text)
+        if match:
+            details["sector"] = clean_text(match.group(1))
+        else:
+            # Keyword-based detection
+            for sector in SECTOR_KEYWORDS:
+                if sector in el_text_lower:
+                    details["sector"] = sector.title()
+                    break
+
+    # 6. Extract description (look for longer text blocks)
+    if not details.get("description"):
+        for tag in element.find_all(["p", "div", "span"]):
+            text = clean_text(tag.get_text())
+            if 20 < len(text) < 500:
+                if not any(skip in text.lower() for skip in ["download", "click here", "view more"]):
+                    details["description"] = text[:200]
+                    break
+
+    # 7. Extract deadline
+    if not details.get("deadline"):
+        match = DEADLINE_RE.search(el_text)
+        if match:
+            details["deadline"] = clean_text(match.group(1))
+
+    # 8. Extract post date
+    if not details.get("post_date"):
+        match = POST_DATE_RE.search(el_text)
+        if match:
+            details["post_date"] = match.group(1)
+
+    # 9. Detect data types compromised
+    data_types_found = []
+    for dtype, keywords in DATA_TYPE_INDICATORS.items():
+        if any(kw in el_text_lower for kw in keywords):
+            data_types_found.append(dtype.upper())
+    if data_types_found:
+        details["data_types"] = ", ".join(data_types_found[:4])
+
+    return details
+
+
+def build_victim_summary(victim: Dict, group_name: str) -> str:
+    """Build pipe-delimited summary from victim details."""
+    summary_parts = []
+
+    # Always include ransomware group
+    summary_parts.append(f"Ransomware group: {group_name}")
+
+    # Add country if available
+    if victim.get("country"):
+        summary_parts.append(f"Country: {victim['country']}")
+
+    # Add sector/industry
+    if victim.get("sector"):
+        summary_parts.append(f"Sector: {victim['sector']}")
+
+    # Add website
+    if victim.get("website"):
+        summary_parts.append(f"Website: {victim['website']}")
+
+    # Add data size
+    if victim.get("data_size"):
+        summary_parts.append(f"Data size: {victim['data_size']}")
+
+    # Add data types compromised
+    if victim.get("data_types"):
+        summary_parts.append(f"Data types: {victim['data_types']}")
+
+    # Add deadline if present
+    if victim.get("deadline"):
+        summary_parts.append(f"Deadline: {victim['deadline']}")
+
+    # Add description (truncated)
+    if victim.get("description"):
+        desc = victim["description"][:100]
+        if len(victim["description"]) > 100:
+            desc += "..."
+        summary_parts.append(f"Description: {desc}")
+
+    # Always add source indicator
+    summary_parts.append("Source: Dark web leak site")
+
+    return " | ".join(summary_parts)
+
+
 def parse_leak_site_victims(html: str, group_name: str, site_url: str) -> List[Dict]:
     """Extract victim entries from a ransomware leak site HTML page."""
     soup = BeautifulSoup(html, "lxml")
@@ -689,16 +951,19 @@ def parse_leak_site_victims(html: str, group_name: str, site_url: str) -> List[D
         elements = soup.select(selector)
         if len(elements) >= 3:  # Likely found the victim list
             for el in elements[:50]:  # Limit to avoid huge lists
-                text = clean_text(el.get_text())
-                if len(text) < 3 or len(text) > 200:
+                # Extract victim name using helper
+                name = extract_victim_name(el)
+                if not name:
                     continue
-                # Skip navigation/header elements
-                if any(skip in text.lower() for skip in ["home", "contact", "about", "login", "register"]):
-                    continue
+
+                # Extract detailed information
+                details = extract_victim_details(el)
+
                 victims.append({
-                    "name": text[:100],
+                    "name": name,
                     "group": group_name,
                     "url": site_url,
+                    **details,  # Merge extracted details
                 })
             if victims:
                 break
@@ -707,16 +972,20 @@ def parse_leak_site_victims(html: str, group_name: str, site_url: str) -> List[D
     if not victims:
         # Find all text nodes that look like company names
         for tag in soup.find_all(["h1", "h2", "h3", "h4", "strong", "b", "a"]):
-            text = clean_text(tag.get_text())
-            # Heuristics for company names: capitalized, reasonable length
-            if 3 < len(text) < 80 and not text.islower():
-                if any(skip in text.lower() for skip in ["home", "contact", "about", "login", "download"]):
-                    continue
-                victims.append({
-                    "name": text,
-                    "group": group_name,
-                    "url": site_url,
-                })
+            name = extract_victim_name(tag)
+            if not name:
+                continue
+
+            # Extract details from parent element if available
+            parent = tag.parent
+            details = extract_victim_details(parent) if parent else {}
+
+            victims.append({
+                "name": name,
+                "group": group_name,
+                "url": site_url,
+                **details,
+            })
             if len(victims) >= 30:
                 break
 
@@ -765,6 +1034,22 @@ def fetch_darkweb_leak_sites(source: Dict[str, Any], cfg: Dict[str, Any]) -> Lis
 
                 now = datetime.now(timezone.utc)
                 for victim in victims:
+                    # Use extracted post_date if available, otherwise use current time
+                    if victim.get("post_date"):
+                        published_dt = parse_datetime(victim["post_date"])
+                        has_time = has_time_label(victim["post_date"])
+                        # Fall back to now if parsing fails
+                        if not published_dt:
+                            published_dt = now
+                            has_time = True
+                    else:
+                        published_dt = now
+                        has_time = True
+                    published = format_dt(published_dt)
+
+                    # Build rich summary with all extracted details
+                    summary = build_victim_summary(victim, group_name)
+
                     findings.append(
                         Finding(
                             source_id=source["id"],
@@ -772,10 +1057,10 @@ def fetch_darkweb_leak_sites(source: Dict[str, Any], cfg: Dict[str, Any]) -> Lis
                             source_url=onion_url,
                             title=victim["name"],
                             url=onion_url,
-                            published=format_dt(now),
-                            published_dt=now,
-                            has_time=True,
-                            summary=f"Ransomware group: {group_name} | Source: Dark web leak site",
+                            published=published,
+                            published_dt=published_dt,
+                            has_time=has_time,
+                            summary=summary,
                         )
                     )
 
