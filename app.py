@@ -56,7 +56,12 @@ POST_DATE_RE = re.compile(
 SKIP_WORDS = frozenset([
     "home", "contact", "about", "login", "register", "download",
     "more", "read", "click", "view", "menu", "search", "faq",
+    "next", "prev", "previous", "page", "first", "last", "older", "newer",
+    "back", "forward", "navigation", "archive", "archives",
 ])
+
+# Pattern to detect pagination-like text (e.g., "1 2 3 4 5 ... 78")
+PAGINATION_RE = re.compile(r"^[\d\s.\-–—]+$")
 
 # Country name to ISO code mapping
 COUNTRY_CODES = {
@@ -781,25 +786,47 @@ def extract_data_attributes(element) -> Dict[str, str]:
     return details
 
 
+def is_valid_victim_name(text: str) -> bool:
+    """Check if text looks like a valid company/victim name."""
+    if not text or len(text) < 3:
+        return False
+    # Skip navigation words
+    text_lower = text.lower()
+    if any(skip in text_lower for skip in SKIP_WORDS):
+        return False
+    # Skip pagination patterns (e.g., "1 2 3 4 5 ... 78")
+    if PAGINATION_RE.match(text):
+        return False
+    # Skip if mostly digits (allow some digits in company names like "3M")
+    alpha_count = sum(1 for c in text if c.isalpha())
+    if alpha_count < 2:
+        return False
+    # Skip very short strings that are just numbers with punctuation
+    stripped = text.replace(" ", "").replace(".", "").replace("-", "")
+    if stripped.isdigit():
+        return False
+    return True
+
+
 def extract_victim_name(element) -> Optional[str]:
     """Extract victim/company name from an HTML element."""
     # Try heading tags first
     for tag in element.find_all(["h1", "h2", "h3", "h4", "h5", "strong", "b"]):
         text = clean_text(tag.get_text())
-        if 3 < len(text) < 100:
-            if not any(skip in text.lower() for skip in SKIP_WORDS):
-                return text
+        if 3 < len(text) < 100 and is_valid_victim_name(text):
+            return text
 
     # Try data-* attributes
     for attr in ["data-name", "data-company", "data-victim", "data-title"]:
         if element.has_attr(attr):
-            return clean_text(element[attr])
+            val = clean_text(element[attr])
+            if is_valid_victim_name(val):
+                return val
 
     # Fallback to full element text (truncated)
     text = clean_text(element.get_text())
-    if 3 < len(text) < 200:
-        if not any(skip in text.lower() for skip in SKIP_WORDS):
-            return text[:100]
+    if 3 < len(text) < 200 and is_valid_victim_name(text):
+        return text[:100]
 
     return None
 
