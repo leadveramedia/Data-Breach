@@ -174,6 +174,18 @@ def clean_text(text: str) -> str:
     return re.sub(r"\s+", " ", text or "").strip()
 
 
+def strip_html(text: str) -> str:
+    """Remove HTML tags and decode entities, returning plain text."""
+    if not text:
+        return ""
+    # Use BeautifulSoup to extract text from HTML
+    soup = BeautifulSoup(text, "lxml")
+    # Get text content
+    plain = soup.get_text(separator=" ")
+    # Clean up whitespace
+    return clean_text(plain)
+
+
 def parse_datetime(value: str) -> Optional[datetime]:
     if not value:
         return None
@@ -604,14 +616,18 @@ def fetch_cisa_rss(source: Dict[str, Any], cfg: Dict[str, Any]) -> List[Finding]
     findings: List[Finding] = []
     for entry in entries:
         title = clean_text(entry.get("title", ""))
-        summary = clean_text(entry.get("summary", ""))
+        # Strip HTML tags from RSS summary content
+        full_summary = strip_html(entry.get("summary", ""))
         date_val = entry.get("published", "") or entry.get("updated", "")
         published_dt = parse_datetime(date_val)
         has_time = has_time_label(date_val)
         published = format_dt(published_dt)
         url = entry.get("link", "")
-        if not keyword_hit(f"{title} {summary}", keywords):
+        # Use full text for keyword matching
+        if not keyword_hit(f"{title} {full_summary}", keywords):
             continue
+        # Truncate summary for display
+        summary = full_summary[:500] + "..." if len(full_summary) > 500 else full_summary
         findings.append(
             Finding(
                 source_id=source["id"],
